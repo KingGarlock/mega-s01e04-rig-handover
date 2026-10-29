@@ -10,6 +10,11 @@ import { StatusBoard } from './views/status.js';
 export function createApp(config: RigConfig = loadConfig()) {
   const app = new Hono();
 
+  app.get('/api/digest/:night', (c) => {
+    const digest = readNight(config.runsDir, c.req.param('night'));
+    return digest === null ? c.notFound() : c.json(digest);
+  });
+
   app.get('/health', (c) => c.json({ ok: true, lane: lane().id }));
 
   app.get('/', (c) =>
