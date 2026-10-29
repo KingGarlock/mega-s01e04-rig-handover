@@ -1,0 +1,62 @@
+name: Publish review preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      include_marker:
+        description: Include the course lane marker for initial review
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.0'
+      - run: bun install --frozen-lockfile
+      - run: bun run test && bun run typecheck
+      - name: Save the live digest as HTML
+        env:
+          LANE_MARKER: ${{ inputs.include_marker && secrets.LANE_MARKER || '' }}
+          LANE_ID: lane-07
+          PORT: '8787'
+        run: |
+          if [ '${{ inputs.include_marker }}' = 'true' ] && [ -z "$LANE_MARKER" ]; then
+            echo 'The course lane marker secret is missing.' >&2
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/preview"
+          bun run start > "$RUNNER_TEMP/rig.log" 2>&1 &
+          rig_pid=$!
+          trap 'kill "$rig_pid" 2>/dev/null || true' EXIT
+          curl --fail --silent --show-error --retry 20 --retry-connrefused --retry-delay 1 \
+            http://127.0.0.1:8787/digest/2026-10-28 -o "$RUNNER_TEMP/preview/index.html"
+          if [ '${{ inputs.include_marker }}' = 'true' ]; then
+            grep -qF "$LANE_MARKER" "$RUNNER_TEMP/preview/index.html"
+          else
+            grep -qF 'no marker set' "$RUNNER_TEMP/preview/index.html"
+          fi
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ runner.temp }}/preview
+          retention-days: 1
+      - name: Deploy the preview
+        id: deployment
+        uses: actions/deploy-pages@v4
